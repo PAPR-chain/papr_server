@@ -1,0 +1,10 @@
+tmp*
+back_*
+*__pycache__*
+*.swp
+*.swo
+old*
+_*
+!__init__.py
+*.json
+*.sqlite3
