@@ -30,7 +30,7 @@ class AuthenticationTests(APITestCase):
         self.assertIn('pub_key', response.json())
         self.assertEqual(response.status_code, 200)
 
-    def test_use_token(self):
+    def test_use_token_get(self):
         response = self.client.get("/api/token/@RTremblay", format='json')
 
         token_access = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['access'])
@@ -53,6 +53,76 @@ class AuthenticationTests(APITestCase):
         self.assertEqual(data['author_list'], "Robert Tremblay")
         self.assertIn('corresponding_author', data)
         self.assertEqual(data['corresponding_author'], "@RTremblay")
+
+    def test_use_token_post(self):
+        response = self.client.get("/api/token/@RTremblay", format='json')
+
+        token_access = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['access'])
+        token_refresh = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['refresh'])
+
+        data = {
+            "title": "My paper",
+            "claim_name": "my-paper",
+            "claim_id": "12345",
+            "author_list": "Robert Tremblay",
+            "corresponding_author": "@RTremblay",
+
+        }
+        self.assertEqual(Manuscript.objects.count(), 1)
+        response = self.client.post("/api/manuscripts/my-paper", data=data, format='json', HTTP_AUTHORIZATION="Bearer "+token_access)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Manuscript.objects.count(), 2)
+
+        m = Manuscript.objects.latest('pk')
+
+        self.assertEqual(m.title, data["title"])
+        self.assertEqual(m.claim_name, data["claim_name"])
+        self.assertEqual(m.claim_id, data["claim_id"])
+        self.assertEqual(m.author_list, data["author_list"])
+        self.assertEqual(m.corresponding_author.channel_name, data["corresponding_author"])
+
+    def test_use_token_post_channel_mismatch(self):
+        private_key, public_key = generate_SECP256k1_keys("password123")
+        Researcher.objects.create(full_name="Steve Goder", channel_name="@SGoder", public_key=public_key)
+
+        response = self.client.get("/api/token/@RTremblay", format='json')
+
+        token_access = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['access'])
+        token_refresh = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['refresh'])
+
+        data = {
+            "title": "My paper",
+            "claim_name": "my-paper",
+            "claim_id": "12345",
+            "author_list": "Robert Tremblay",
+            "corresponding_author": "@SGoder",
+
+        }
+        self.assertEqual(Manuscript.objects.count(), 1)
+        response = self.client.post("/api/manuscripts/my-paper", data=data, format='json', HTTP_AUTHORIZATION="Bearer "+token_access)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(Manuscript.objects.count(), 1)
+
+
+    def test_use_token_post_channel_mismatch_does_not_exist(self):
+        response = self.client.get("/api/token/@RTremblay", format='json')
+
+        token_access = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['access'])
+        token_refresh = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['refresh'])
+
+        data = {
+            "title": "My paper",
+            "claim_name": "my-paper",
+            "claim_id": "12345",
+            "author_list": "Robert Tremblay",
+            "corresponding_author": "@SGoder",
+
+        }
+        self.assertEqual(Manuscript.objects.count(), 1)
+        response = self.client.post("/api/manuscripts/my-paper", data=data, format='json', HTTP_AUTHORIZATION="Bearer "+token_access)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(Manuscript.objects.count(), 1)
+
 
     def test_decrypt_wrong_key(self):
         response = self.client.get("/api/token/@RTremblay", format='json')

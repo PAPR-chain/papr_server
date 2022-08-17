@@ -8,3 +8,4 @@ _*
 !__init__.py
 *.json
 *.sqlite3
+*migrations*

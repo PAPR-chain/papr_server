@@ -27,6 +27,10 @@ def manuscript(request, claim_name):
         serializer = ManuscriptSerializer(manuscript)
         return Response(serializer.data)
     elif request.method == 'POST':
+        if "corresponding_author" not in request.data:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+        if request.data["corresponding_author"] != request.auth["researcher_id"]:
+            return Response(status=status.HTTP_403_FORBIDDEN)
         serializer = ManuscriptSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
