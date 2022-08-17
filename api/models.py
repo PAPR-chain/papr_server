@@ -10,7 +10,7 @@ class Researcher(AbstractBaseUser, PermissionsMixin):
     joined = models.DateTimeField(auto_now_add=True)
     full_name = models.CharField(max_length=255, default="", blank=True)
     email = models.EmailField(default='', blank=True, unique=True, validators=[EmailValidator])
-    public_key = models.CharField(max_length=1024, null=True)
+    public_key = models.CharField(max_length=316, null=True)
 
     USERNAME_FIELD = 'channel_name'
     REQUIRED_FIELDS = []

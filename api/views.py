@@ -24,8 +24,8 @@ def manuscript(request, claim_name):
         except Manuscript.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        serializer = ManuscriptSerializer(manuscript, many=True)
-        return Reponse(serializer.data)
+        serializer = ManuscriptSerializer(manuscript)
+        return Response(serializer.data)
     elif request.method == 'POST':
         serializer = ManuscriptSerializer(data=request.data)
         if serializer.is_valid():

@@ -6,6 +6,8 @@ from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
 )
+
+from papr_server import views
 '''
 # Serializers define the API representation.
 class UserSerializer(serializers.HyperlinkedModelSerializer):
@@ -26,7 +28,8 @@ router = routers.DefaultRouter()
 urlpatterns = [
         path('', include(router.urls)),
         path("api/", include("api.urls")),
-        path("api/token/", TokenObtainPairView.as_view()),
+        #path("api/token/", TokenObtainPairView.as_view()),
+        path("api/token/<str:channel_name>", views.get_token),
         path("api/token/refresh", TokenRefreshView.as_view()),
         path('api-auth/', include('rest_framework.urls')),
 ]
