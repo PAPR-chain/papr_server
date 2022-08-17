@@ -1,4 +1,7 @@
+from django.test import Client
+
 from rest_framework.test import APITestCase
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from api import views
 from api.models import *
@@ -135,10 +138,14 @@ class AuthenticationTests(APITestCase):
             token_refresh = SECP_decrypt_text(private_key, response.json()['pub_key'], response.json()['refresh'])
 
 
+    # refresh token
+
 class ManuscriptTests(APITestCase):
     def setUp(self):
         self.researcher = Researcher.objects.create(full_name="Robert Tremblay", channel_name="@RTremblay")
-        self.client.force_authenticate(self.researcher)
+        token = RefreshToken.for_user(self.researcher)
+        self.headers = {"HTTP_AUTHORIZATION": f"Bearer {str(token.access_token)}"}
+        self.client = Client(**self.headers)
 
     def tearDown(self):
         pass
@@ -182,18 +189,4 @@ class ManuscriptTests(APITestCase):
         self.assertEqual(m.claim_id, data["claim_id"])
         self.assertEqual(m.author_list, data["author_list"])
         self.assertEqual(m.corresponding_author.channel_name, data["corresponding_author"])
-
-    def test_post_manuscript_author_not_registered(self):
-        data = {
-            "title": "My paper",
-            "claim_name": "my-paper",
-            "claim_id": "12345",
-            "author_list": "Steve Bobbins",
-            "corresponding_author": "@SteveB",
-
-        }
-        response = self.client.post(f"/api/manuscripts/{data['claim_name']}", data=data, format='json')
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("corresponding_author", response.json())
-
 
