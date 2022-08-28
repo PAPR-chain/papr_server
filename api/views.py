@@ -20,6 +20,10 @@ from api.serializers import ManuscriptSerializer, ResearcherSerializer
 
 from papr_server.settings import PAPR_SERVER_NAME, PAPR_SERVER_CHANNEL_NAME
 
+SERVER_DESC = {
+            "name": PAPR_SERVER_NAME,
+            "channel_name": PAPR_SERVER_CHANNEL_NAME,
+}
 
 @api_view(["GET"])
 def manuscript_list(request):
@@ -47,13 +51,26 @@ def submit(request):
         if "corresponding_author" not in request.data:
             return Response(status=status.HTTP_400_BAD_REQUEST)
         if request.data["corresponding_author"] != request.auth["researcher_id"]:
-            return Response(status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': "You are not authenticated as the corresponding author of the publication"}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = ManuscriptSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        res = call("resolve", urls=request.data["claim_name"]).json()
+        if request.data["claim_name"] not in res['result'] or 'error' in res['result'][request.data["claim_name"]]:
+            return Response({'error': "Publication not found on the blockchain"}, status=status.HTTP_404_NOT_FOUND)
+
+        pub_data = res['result'][request.data["claim_name"]]
+
+        if pub_data['value']['title'] != request.data["title"]:
+            return Response({'error': "The submitted title does not match the title of the publication"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if pub_data['value']['author'] != request.data["author_list"]:
+            return Response({'error': "The submitted author list does not match the author list of the publication"}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 @api_view(["POST"])
@@ -106,10 +123,7 @@ def register(request):
     ## Public key
 
     return JsonResponse(
-        {
-            "name": PAPR_SERVER_NAME,
-            "channel_name": PAPR_SERVER_CHANNEL_NAME,
-        },
+            SERVER_DESC,
         status=status.HTTP_201_CREATED,
     )
 
@@ -118,10 +132,7 @@ def register(request):
 @permission_classes([])
 def info(request):
     return JsonResponse(
-        {
-            "name": PAPR_SERVER_NAME,
-            "channel_name": PAPR_SERVER_CHANNEL_NAME,
-        },
+        SERVER_DESC,
         status=status.HTTP_200_OK,
     )
 

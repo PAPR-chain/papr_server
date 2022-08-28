@@ -1,23 +1,15 @@
 import os
-import logging
 
-from io import StringIO
-from asgiref.sync import sync_to_async
-from rest_framework.test import APITestCase, APIClient, APITransactionTestCase
+from rest_framework.test import APITestCase, APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from django.core.management import call_command
-from unittest import mock
+from lbry.wallet.manager import WalletManager  # Prevent circular import
 
-from lbry.wallet.manager import WalletManager # Prevent circular import
-
-from papr.testcase import PaprDaemonTestCase
 from papr.utilities import generate_SECP256k1_keys, SECP_decrypt_text
 
 from api import views
 from api.models import *
 
-log = logging.getLogger("sqlalchemy.engine.Engine").disabled = True
 
 class AuthenticationTests(APITestCase):
     @classmethod
@@ -26,53 +18,77 @@ class AuthenticationTests(APITestCase):
         super().setUpClass()
 
     def setUp(self):
-        self.researcher = Researcher.objects.create(full_name="Robert Tremblay", channel_name="@RTremblay", public_key=self.public_key)
-        m = Manuscript.objects.create(claim_name="paper-tremblay", claim_id="123456", title="Theory of Everything", author_list="Robert Tremblay", corresponding_author=self.researcher)
+        self.researcher = Researcher.objects.create(
+            full_name="Robert Tremblay",
+            channel_name="@RTremblay",
+            public_key=self.public_key,
+        )
+        m = Manuscript.objects.create(
+            claim_name="paper-tremblay",
+            claim_id="123456",
+            title="Theory of Everything",
+            author_list="Robert Tremblay",
+            corresponding_author=self.researcher,
+        )
 
     def tearDown(self):
         pass
 
     def test_get_manuscript_unauth(self):
-        response = self.client.get("/api/manuscripts/paper-tremblay", format='json')
+        response = self.client.get("/api/manuscripts/paper-tremblay", format="json")
         self.assertEqual(response.status_code, 401)
-        self.assertEqual(response.json()['detail'], "Authentication credentials were not provided.")
+        self.assertEqual(
+            response.json()["detail"], "Authentication credentials were not provided."
+        )
 
     def test_get_token(self):
-        response = self.client.get("/api/token/@RTremblay", format='json')
-        self.assertIn('access', response.json())
-        self.assertIn('refresh', response.json())
-        self.assertIn('pub_key', response.json())
+        response = self.client.get("/api/token/@RTremblay", format="json")
+        self.assertIn("access", response.json())
+        self.assertIn("refresh", response.json())
+        self.assertIn("pub_key", response.json())
         self.assertEqual(response.status_code, 200)
 
     def test_use_token_get(self):
-        response = self.client.get("/api/token/@RTremblay", format='json')
+        response = self.client.get("/api/token/@RTremblay", format="json")
 
-        token_access = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['access'])
-        token_refresh = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['refresh'])
+        token_access = SECP_decrypt_text(
+            self.private_key, response.json()["pub_key"], response.json()["access"]
+        )
+        token_refresh = SECP_decrypt_text(
+            self.private_key, response.json()["pub_key"], response.json()["refresh"]
+        )
 
-        response = self.client.get("/api/manuscripts/paper-tremblay", format='json', HTTP_AUTHORIZATION="Bearer "+token_access)
+        response = self.client.get(
+            "/api/manuscripts/paper-tremblay",
+            format="json",
+            HTTP_AUTHORIZATION="Bearer " + token_access,
+        )
         self.assertEqual(response.status_code, 200)
 
         data = response.json()
-        self.assertIn('title', data)
-        self.assertEqual(data['title'], "Theory of Everything")
+        self.assertIn("title", data)
+        self.assertEqual(data["title"], "Theory of Everything")
 
-        self.assertIn('claim_name', data)
-        self.assertEqual(data['claim_name'], "paper-tremblay")
+        self.assertIn("claim_name", data)
+        self.assertEqual(data["claim_name"], "paper-tremblay")
 
-        self.assertIn('claim_id', data)
-        self.assertEqual(data['claim_id'], "123456")
+        self.assertIn("claim_id", data)
+        self.assertEqual(data["claim_id"], "123456")
 
-        self.assertIn('author_list', data)
-        self.assertEqual(data['author_list'], "Robert Tremblay")
-        self.assertIn('corresponding_author', data)
-        self.assertEqual(data['corresponding_author'], "@RTremblay")
+        self.assertIn("author_list", data)
+        self.assertEqual(data["author_list"], "Robert Tremblay")
+        self.assertIn("corresponding_author", data)
+        self.assertEqual(data["corresponding_author"], "@RTremblay")
 
     def test_use_token_post(self):
-        response = self.client.get("/api/token/@RTremblay", format='json')
+        response = self.client.get("/api/token/@RTremblay", format="json")
 
-        token_access = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['access'])
-        token_refresh = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['refresh'])
+        token_access = SECP_decrypt_text(
+            self.private_key, response.json()["pub_key"], response.json()["access"]
+        )
+        token_refresh = SECP_decrypt_text(
+            self.private_key, response.json()["pub_key"], response.json()["refresh"]
+        )
 
         data = {
             "title": "My paper",
@@ -80,29 +96,41 @@ class AuthenticationTests(APITestCase):
             "claim_id": "12345",
             "author_list": "Robert Tremblay",
             "corresponding_author": "@RTremblay",
-
         }
         self.assertEqual(Manuscript.objects.count(), 1)
-        response = self.client.post("/api/submit/", data=data, format='json', HTTP_AUTHORIZATION="Bearer "+token_access)
+        response = self.client.post(
+            "/api/submit/",
+            data=data,
+            format="json",
+            HTTP_AUTHORIZATION="Bearer " + token_access,
+        )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(Manuscript.objects.count(), 2)
 
-        m = Manuscript.objects.latest('pk')
+        m = Manuscript.objects.latest("pk")
 
         self.assertEqual(m.title, data["title"])
         self.assertEqual(m.claim_name, data["claim_name"])
         self.assertEqual(m.claim_id, data["claim_id"])
         self.assertEqual(m.author_list, data["author_list"])
-        self.assertEqual(m.corresponding_author.channel_name, data["corresponding_author"])
+        self.assertEqual(
+            m.corresponding_author.channel_name, data["corresponding_author"]
+        )
 
     def test_use_token_post_channel_mismatch(self):
         private_key, public_key = generate_SECP256k1_keys("password123")
-        Researcher.objects.create(full_name="Steve Goder", channel_name="@SGoder", public_key=public_key)
+        Researcher.objects.create(
+            full_name="Steve Goder", channel_name="@SGoder", public_key=public_key
+        )
 
-        response = self.client.get("/api/token/@RTremblay", format='json')
+        response = self.client.get("/api/token/@RTremblay", format="json")
 
-        token_access = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['access'])
-        token_refresh = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['refresh'])
+        token_access = SECP_decrypt_text(
+            self.private_key, response.json()["pub_key"], response.json()["access"]
+        )
+        token_refresh = SECP_decrypt_text(
+            self.private_key, response.json()["pub_key"], response.json()["refresh"]
+        )
 
         data = {
             "title": "My paper",
@@ -110,19 +138,26 @@ class AuthenticationTests(APITestCase):
             "claim_id": "12345",
             "author_list": "Robert Tremblay",
             "corresponding_author": "@SGoder",
-
         }
         self.assertEqual(Manuscript.objects.count(), 1)
-        response = self.client.post("/api/submit/", data=data, format='json', HTTP_AUTHORIZATION="Bearer "+token_access)
+        response = self.client.post(
+            "/api/submit/",
+            data=data,
+            format="json",
+            HTTP_AUTHORIZATION="Bearer " + token_access,
+        )
         self.assertEqual(response.status_code, 403)
         self.assertEqual(Manuscript.objects.count(), 1)
-
 
     def test_use_token_post_channel_mismatch_does_not_exist(self):
-        response = self.client.get("/api/token/@RTremblay", format='json')
+        response = self.client.get("/api/token/@RTremblay", format="json")
 
-        token_access = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['access'])
-        token_refresh = SECP_decrypt_text(self.private_key, response.json()['pub_key'], response.json()['refresh'])
+        token_access = SECP_decrypt_text(
+            self.private_key, response.json()["pub_key"], response.json()["access"]
+        )
+        token_refresh = SECP_decrypt_text(
+            self.private_key, response.json()["pub_key"], response.json()["refresh"]
+        )
 
         data = {
             "title": "My paper",
@@ -130,121 +165,79 @@ class AuthenticationTests(APITestCase):
             "claim_id": "12345",
             "author_list": "Robert Tremblay",
             "corresponding_author": "@SGoder",
-
         }
         self.assertEqual(Manuscript.objects.count(), 1)
-        response = self.client.post("/api/submit/", data=data, format='json', HTTP_AUTHORIZATION="Bearer "+token_access)
+        response = self.client.post(
+            "/api/submit/",
+            data=data,
+            format="json",
+            HTTP_AUTHORIZATION="Bearer " + token_access,
+        )
         self.assertEqual(response.status_code, 403)
         self.assertEqual(Manuscript.objects.count(), 1)
 
-
     def test_decrypt_wrong_key(self):
-        response = self.client.get("/api/token/@RTremblay", format='json')
+        response = self.client.get("/api/token/@RTremblay", format="json")
 
         private_key, public_key = generate_SECP256k1_keys("snooper")
 
         with self.assertRaises(Exception):
-            token_access = SECP_decrypt_text(private_key, response.json()['pub_key'], response.json()['access'])
+            token_access = SECP_decrypt_text(
+                private_key, response.json()["pub_key"], response.json()["access"]
+            )
         with self.assertRaises(Exception):
-            token_refresh = SECP_decrypt_text(private_key, response.json()['pub_key'], response.json()['refresh'])
-
+            token_refresh = SECP_decrypt_text(
+                private_key, response.json()["pub_key"], response.json()["refresh"]
+            )
 
     # refresh token
 
-class ResearcherTests(PaprDaemonTestCase):
+
+class ManuscriptAccessTests(APITestCase):
     def setUp(self):
-        # Make sure not to pollute and flush a production database
-        assert 'PAPR_IS_TEST' in os.environ
-        super().setUp()
-        self.client = APIClient()
-
-    async def asyncSetUp(self):
-        await super().asyncSetUp()
-
-        with mock.patch('sys.stdout', new = StringIO()) as std_out:
-            await self.daemon.start()
-            # PaprDaemonTestCase and APITestCase don't play nice with each other,
-            # it is thus necessary to manually handle the test database.
-            await sync_to_async(call_command)("migrate")
-
-    async def asyncTearDown(self):
-        await super().asyncTearDown()
-
-        with mock.patch('sys.stdout', new = StringIO()) as std_out:
-            await sync_to_async(call_command)("flush", "--no-input")
-
-    async def test_register(self):
-
-        tx = await self.daemon.jsonrpc_channel_create("@RTremblay", bid="1.0")
-        await self.generate(1)
-        await self.ledger.wait(tx, self.blockchain.block_expected)
-
-        self.assertEqual(await sync_to_async(Researcher.objects.count)(), 0)
-        response = await sync_to_async(self.client.post)("/api/register/", format='json', data={'channel_name': "@RTremblay"})
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(await sync_to_async(Researcher.objects.count)(), 1)
-
-    async def test_register_duplicate(self):
-        tx = await self.daemon.jsonrpc_channel_create("@RTremblay", bid="1.0")
-        await self.generate(1)
-        await self.ledger.wait(tx, self.blockchain.block_expected)
-
-        self.assertEqual(await sync_to_async(Researcher.objects.count)(), 0)
-        researcher = await sync_to_async(Researcher.objects.create)(full_name="Robert Tremblay", channel_name="@RTremblay")
-        token = RefreshToken.for_user(researcher)
-        response = await sync_to_async(self.client.post)("/api/register/", format='json', data={'channel_name': "@RTremblay"}, headers={"HTTP_AUTHORIZATION": f"Bearer {str(token.access_token)}"})
-        self.assertEqual(response.status_code, 403)
-
-
-
-class ManuscriptTests(APITestCase):
-    def setUp(self):
-        self.researcher = Researcher.objects.create(full_name="Robert Tremblay", channel_name="@RTremblay")
+        self.researcher = Researcher.objects.create(
+            full_name="Robert Tremblay", channel_name="@RTremblay"
+        )
         token = RefreshToken.for_user(self.researcher)
         self.headers = {"HTTP_AUTHORIZATION": f"Bearer {str(token.access_token)}"}
-        self.client = Client(**self.headers)
+        self.client = APIClient(**self.headers)
 
     def tearDown(self):
         pass
 
     def test_get_manuscripts_empty(self):
-        response = self.client.get("/api/manuscripts/", format='json')
+        response = self.client.get("/api/manuscripts/", format="json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
     def test_get_manuscripts_one(self):
-        m = Manuscript.objects.create(claim_name="paper-tremblay", claim_id="123456", title="Theory of Everything", author_list="Robert Tremblay", corresponding_author=self.researcher)
-        response = self.client.get("/api/manuscripts/", format='json')
+        m = Manuscript.objects.create(
+            claim_name="paper-tremblay",
+            claim_id="123456",
+            title="Theory of Everything",
+            author_list="Robert Tremblay",
+            corresponding_author=self.researcher,
+        )
+        response = self.client.get("/api/manuscripts/", format="json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
 
     def test_get_manuscripts_multiple(self):
-        m = Manuscript.objects.create(claim_name="paper-tremblay", claim_id="123456", title="Theory of Everything", author_list="Robert Tremblay", corresponding_author=self.researcher)
-        m = Manuscript.objects.create(claim_name="paper2-tremblay", claim_id="123457", title="Correction to 'Theory of Everything'", author_list="Robert Tremblay", corresponding_author=self.researcher)
-        response = self.client.get("/api/manuscripts/", format='json')
+        m = Manuscript.objects.create(
+            claim_name="paper-tremblay",
+            claim_id="123456",
+            title="Theory of Everything",
+            author_list="Robert Tremblay",
+            corresponding_author=self.researcher,
+        )
+        m = Manuscript.objects.create(
+            claim_name="paper2-tremblay",
+            claim_id="123457",
+            title="Correction to 'Theory of Everything'",
+            author_list="Robert Tremblay",
+            corresponding_author=self.researcher,
+        )
+        response = self.client.get("/api/manuscripts/", format="json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 2)
-
-    def test_post_manuscript_author_valid(self):
-        data = {
-            "title": "My paper",
-            "claim_name": "my-paper",
-            "claim_id": "12345",
-            "author_list": "Robert Tremblay",
-            "corresponding_author": "@RTremblay",
-
-        }
-        self.assertEqual(Manuscript.objects.count(), 0)
-        response = self.client.post(f"/api/submit/", data=data, format='json')
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(Manuscript.objects.count(), 1)
-
-        m = Manuscript.objects.latest('pk')
-
-        self.assertEqual(m.title, data["title"])
-        self.assertEqual(m.claim_name, data["claim_name"])
-        self.assertEqual(m.claim_id, data["claim_id"])
-        self.assertEqual(m.author_list, data["author_list"])
-        self.assertEqual(m.corresponding_author.channel_name, data["corresponding_author"])
-
 
