@@ -19,6 +19,7 @@ class Researcher(AbstractBaseUser, PermissionsMixin):
 
     # Fields of research?
     # Number of manuscripts/reviews?
+    # URL to proof of channel
 
     def __str__(self):
         return self.channel_name

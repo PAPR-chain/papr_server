@@ -13,7 +13,7 @@ class ManuscriptSerializer(ModelSerializer):
 class ResearcherSerializer(ModelSerializer):
     class Meta:
         model = Researcher
-        fields = ['name', 'channel_name', 'email']
+        fields = ['full_name', 'channel_name', 'email']
 
 class ReviewSerializer(ModelSerializer):
     class Meta:

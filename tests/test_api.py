@@ -1,12 +1,23 @@
-from django.test import Client
+import os
+import logging
 
-from rest_framework.test import APITestCase
+from io import StringIO
+from asgiref.sync import sync_to_async
+from rest_framework.test import APITestCase, APIClient, APITransactionTestCase
 from rest_framework_simplejwt.tokens import RefreshToken
+
+from django.core.management import call_command
+from unittest import mock
+
+from lbry.wallet.manager import WalletManager # Prevent circular import
+
+from papr.testcase import PaprDaemonTestCase
+from papr.utilities import generate_SECP256k1_keys, SECP_decrypt_text
 
 from api import views
 from api.models import *
 
-from papr.utilities import generate_SECP256k1_keys, SECP_decrypt_text
+log = logging.getLogger("sqlalchemy.engine.Engine").disabled = True
 
 class AuthenticationTests(APITestCase):
     @classmethod
@@ -72,7 +83,7 @@ class AuthenticationTests(APITestCase):
 
         }
         self.assertEqual(Manuscript.objects.count(), 1)
-        response = self.client.post("/api/manuscripts/my-paper", data=data, format='json', HTTP_AUTHORIZATION="Bearer "+token_access)
+        response = self.client.post("/api/submit/", data=data, format='json', HTTP_AUTHORIZATION="Bearer "+token_access)
         self.assertEqual(response.status_code, 201)
         self.assertEqual(Manuscript.objects.count(), 2)
 
@@ -102,7 +113,7 @@ class AuthenticationTests(APITestCase):
 
         }
         self.assertEqual(Manuscript.objects.count(), 1)
-        response = self.client.post("/api/manuscripts/my-paper", data=data, format='json', HTTP_AUTHORIZATION="Bearer "+token_access)
+        response = self.client.post("/api/submit/", data=data, format='json', HTTP_AUTHORIZATION="Bearer "+token_access)
         self.assertEqual(response.status_code, 403)
         self.assertEqual(Manuscript.objects.count(), 1)
 
@@ -122,7 +133,7 @@ class AuthenticationTests(APITestCase):
 
         }
         self.assertEqual(Manuscript.objects.count(), 1)
-        response = self.client.post("/api/manuscripts/my-paper", data=data, format='json', HTTP_AUTHORIZATION="Bearer "+token_access)
+        response = self.client.post("/api/submit/", data=data, format='json', HTTP_AUTHORIZATION="Bearer "+token_access)
         self.assertEqual(response.status_code, 403)
         self.assertEqual(Manuscript.objects.count(), 1)
 
@@ -139,6 +150,52 @@ class AuthenticationTests(APITestCase):
 
 
     # refresh token
+
+class ResearcherTests(PaprDaemonTestCase):
+    def setUp(self):
+        # Make sure not to pollute and flush a production database
+        assert 'PAPR_IS_TEST' in os.environ
+        super().setUp()
+        self.client = APIClient()
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+
+        with mock.patch('sys.stdout', new = StringIO()) as std_out:
+            await self.daemon.start()
+            # PaprDaemonTestCase and APITestCase don't play nice with each other,
+            # it is thus necessary to manually handle the test database.
+            await sync_to_async(call_command)("migrate")
+
+    async def asyncTearDown(self):
+        await super().asyncTearDown()
+
+        with mock.patch('sys.stdout', new = StringIO()) as std_out:
+            await sync_to_async(call_command)("flush", "--no-input")
+
+    async def test_register(self):
+
+        tx = await self.daemon.jsonrpc_channel_create("@RTremblay", bid="1.0")
+        await self.generate(1)
+        await self.ledger.wait(tx, self.blockchain.block_expected)
+
+        self.assertEqual(await sync_to_async(Researcher.objects.count)(), 0)
+        response = await sync_to_async(self.client.post)("/api/register/", format='json', data={'channel_name': "@RTremblay"})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(await sync_to_async(Researcher.objects.count)(), 1)
+
+    async def test_register_duplicate(self):
+        tx = await self.daemon.jsonrpc_channel_create("@RTremblay", bid="1.0")
+        await self.generate(1)
+        await self.ledger.wait(tx, self.blockchain.block_expected)
+
+        self.assertEqual(await sync_to_async(Researcher.objects.count)(), 0)
+        researcher = await sync_to_async(Researcher.objects.create)(full_name="Robert Tremblay", channel_name="@RTremblay")
+        token = RefreshToken.for_user(researcher)
+        response = await sync_to_async(self.client.post)("/api/register/", format='json', data={'channel_name': "@RTremblay"}, headers={"HTTP_AUTHORIZATION": f"Bearer {str(token.access_token)}"})
+        self.assertEqual(response.status_code, 403)
+
+
 
 class ManuscriptTests(APITestCase):
     def setUp(self):
@@ -178,7 +235,7 @@ class ManuscriptTests(APITestCase):
 
         }
         self.assertEqual(Manuscript.objects.count(), 0)
-        response = self.client.post(f"/api/manuscripts/{data['claim_name']}", data=data, format='json')
+        response = self.client.post(f"/api/submit/", data=data, format='json')
         self.assertEqual(response.status_code, 201)
         self.assertEqual(Manuscript.objects.count(), 1)
 
@@ -189,4 +246,5 @@ class ManuscriptTests(APITestCase):
         self.assertEqual(m.claim_id, data["claim_id"])
         self.assertEqual(m.author_list, data["author_list"])
         self.assertEqual(m.corresponding_author.channel_name, data["corresponding_author"])
+
 

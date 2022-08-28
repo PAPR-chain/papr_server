@@ -7,6 +7,8 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
 
+from lbry.wallet.manager import WalletManager # Prevent circular import
+
 from papr_server import views
 '''
 # Serializers define the API representation.

@@ -1,9 +1,11 @@
+import os
+import sys
+
 from pathlib import Path
 from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.0/howto/deployment/checklist/
@@ -16,6 +18,10 @@ DEBUG = True
 
 ALLOWED_HOSTS = ["0.0.0.0"]
 
+PAPR_SERVER_NAME = os.getenv("PAPR_SERVER_NAME", "Test Review Server")
+PAPR_SERVER_CHANNEL_NAME = os.getenv("PAPR_SERVER_CHANNEL_NAME", "@TestReviewServer")
+
+IS_TEST = "unittest" in sys.modules or "PAPR_IS_TEST" in os.environ
 
 # Application definition
 
@@ -110,9 +116,11 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    },
 }
 
+if IS_TEST:
+    DATABASES['default']['NAME'] = ':memory:'
 
 # Password validation
 # https://docs.djangoproject.com/en/4.0/ref/settings/#auth-password-validators
