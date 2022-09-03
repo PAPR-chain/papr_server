@@ -7,7 +7,7 @@ class ManuscriptSerializer(ModelSerializer):
 
     class Meta:
         model = Manuscript
-        fields = ['title', 'claim_name', 'claim_id', 'author_list', 'status', 'corresponding_author']
+        fields = ['title', 'claim_name', 'author_list', 'status', 'corresponding_author']
 
 
 class ResearcherSerializer(ModelSerializer):

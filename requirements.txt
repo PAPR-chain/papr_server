@@ -1,3 +1,4 @@
+aioresponses
 cryptography
 djangorestframework
 djangorestframework-simplejwt

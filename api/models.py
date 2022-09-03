@@ -34,12 +34,16 @@ class Review(models.Model):
 class Manuscript(models.Model):
     submitted = models.DateTimeField(auto_now_add=True)
     claim_name = models.CharField(max_length=255, unique=True)
-    claim_id = models.CharField(max_length=40, unique=True)
+    #claim_id = models.CharField(max_length=40, unique=True)
     title = models.TextField(max_length=1024)
     author_list = models.TextField(max_length=1024)
     corresponding_author = models.ForeignKey(Researcher, on_delete=models.SET_NULL, null=True)
 
     public_key = models.CharField(max_length=1024, null=True)
+    review_password = models.CharField(max_length=1024, null=True)
+
+    encrypted = models.BooleanField(default=False)
+    encryption_password = models.CharField(max_length=1024, null=True)
 
     status = models.PositiveSmallIntegerField(default=0)
 

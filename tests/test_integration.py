@@ -3,6 +3,10 @@ import os
 import tempfile
 import warnings
 import logging
+import json
+import re
+import base64
+from aioresponses import aioresponses
 from asgiref.sync import sync_to_async
 from zipfile import ZipFile
 
@@ -16,6 +20,7 @@ from lbry.crypto.crypt import better_aes_decrypt
 from papr.utilities import file_sha256
 
 from api.models import Researcher, Manuscript
+from api.views import submit, register
 from papr_server.testcase import PaprDaemonAPITestCase
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,7 +40,8 @@ class RegisterTests(PaprDaemonAPITestCase):
         self.assertEqual(await sync_to_async(Researcher.objects.count)(), 1)
 
         chan = await self.daemon.jsonrpc_channel_list()
-        pubkey = chan["items"][0].claim.channel.public_key
+        pubkey_hex = chan["items"][0].claim.channel.public_key
+        pubkey = base64.b64encode(bytes.fromhex(pubkey_hex)).decode()
 
         saved_key = (
             await sync_to_async(Researcher.objects.get)(channel_name="@RTremblay")
@@ -86,7 +92,6 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
         cls.data = {
             "title": "My paper",
             "claim_name": "my-paper_preprint",
-            "claim_id": "12345",
             "author_list": "Robert Tremblay",
             "corresponding_author": "@RTremblay",
         }
@@ -135,7 +140,6 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
 
         self.assertEqual(m.title, self.data["title"])
         self.assertEqual(m.claim_name, self.data["claim_name"])
-        self.assertEqual(m.claim_id, self.data["claim_id"])
         self.assertEqual(m.author_list, self.data["author_list"])
 
         self.assertEqual(await sync_to_async(Manuscript.objects.filter(corresponding_author__channel_name=self.data["corresponding_author"]).count)(), 1)
@@ -166,7 +170,6 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
 
         self.assertEqual(m.title, self.data["title"])
         self.assertEqual(m.claim_name, self.data["claim_name"])
-        self.assertEqual(m.claim_id, self.data["claim_id"])
         self.assertEqual(m.author_list, self.data["author_list"])
 
         self.assertEqual(await sync_to_async(Manuscript.objects.filter(corresponding_author__channel_name=self.data["corresponding_author"]).count)(), 1)
@@ -291,3 +294,51 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
         self.assertEqual(response.status_code, 403)
         self.assertIn('error', response.data)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
+
+
+
+class CompleteIntegrationTests(PaprDaemonAPITestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.data = {
+            "title": "My paper",
+            "claim_name": "my-paper_preprint",
+            "author_list": "Robert Tremblay",
+            "corresponding_author": "@RTremblay",
+        }
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+
+        tx = await self.daemon.jsonrpc_channel_create("@RTremblay", bid="1.0")
+        await self.generate(1)
+        await self.ledger.wait(tx, self.blockchain.block_expected)
+        await self.daemon.channel_load("@RTremblay")
+
+    async def test_submit_for_review(self):
+        with self.mock_server():
+            data = await self.daemon.papr_server_add("http://reviewserver.org")
+
+        file_path = os.path.join(TESTS_DIR, "data", "document1.pdf")
+
+        ret = await self.daemon.papr_article_create(
+            base_claim_name="my-paper",
+            bid="0.001",
+            file_path=file_path,
+            title="My paper",
+            abstract="we did great stuff",
+            authors="Robert Tremblay",
+            tags=["test"],
+            encrypt=False,
+        )
+
+        await self.generate(1)
+        await self.ledger.wait(ret["tx"], self.blockchain.block_expected)
+
+        self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
+
+        with self.mock_server():
+            response = await self.daemon.papr_article_request_review("my-paper", "Test Review Server")
+
+        self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 1)

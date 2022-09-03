@@ -1,5 +1,6 @@
 import asyncio
-import unittest # Sets the IS_TEST variable to True
+import unittest
+import base64
 
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
