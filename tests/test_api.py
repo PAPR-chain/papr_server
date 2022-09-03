@@ -103,7 +103,7 @@ class AuthenticationTests(APITestCase):
                 format="json",
                 HTTP_AUTHORIZATION="Bearer " + token_access,
             )
-        '''
+        """
         self.assertEqual(response.status_code, 201)
         self.assertEqual(Manuscript.objects.count(), 2)
 
@@ -115,7 +115,7 @@ class AuthenticationTests(APITestCase):
         self.assertEqual(
             m.corresponding_author.channel_name, data["corresponding_author"]
         )
-        '''
+        """
 
     def test_use_token_post_channel_mismatch(self):
         private_key, public_key = generate_SECP256k1_keys("password123")
@@ -235,4 +235,3 @@ class ManuscriptAccessTests(APITestCase):
         response = self.client.get("/api/manuscripts/", format="json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 2)
-

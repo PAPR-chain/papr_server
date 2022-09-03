@@ -6,9 +6,11 @@ import logging
 import json
 import re
 import base64
+import datetime
 from aioresponses import aioresponses
 from asgiref.sync import sync_to_async
 from zipfile import ZipFile
+from sqlalchemy.orm import Session
 
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -18,6 +20,8 @@ from lbry.crypto.hash import sha256
 from lbry.crypto.crypt import better_aes_decrypt
 
 from papr.utilities import file_sha256
+from papr.models import Article as ClientArticle
+from papr.models import Manuscript as ClientManuscript
 
 from api.models import Researcher, Manuscript
 from api.views import submit, register
@@ -76,13 +80,11 @@ class RegisterTests(PaprDaemonAPITestCase):
 
     async def test_get_info_unauthenticated(self):
         self.assertEqual(await sync_to_async(Researcher.objects.count)(), 0)
-        response = await sync_to_async(self.client.get)(
-            "/api/info/"
-        )
+        response = await sync_to_async(self.client.get)("/api/info/")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(len(response.json()) > 0)
-        self.assertTrue('name' in response.json())
-        self.assertTrue('channel_name' in response.json())
+        self.assertTrue("name" in response.json())
+        self.assertTrue("channel_name" in response.json())
 
 
 class SubmitManuscriptTests(PaprDaemonAPITestCase):
@@ -108,7 +110,9 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
         )
         self.assertEqual(response.status_code, 201)
 
-        self.researcher = await sync_to_async(Researcher.objects.get)(channel_name="@RTremblay")
+        self.researcher = await sync_to_async(Researcher.objects.get)(
+            channel_name="@RTremblay"
+        )
 
         token = RefreshToken.for_user(self.researcher)
         self.headers = {"HTTP_AUTHORIZATION": f"Bearer {str(token.access_token)}"}
@@ -132,17 +136,26 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
         await self.ledger.wait(ret["tx"], self.blockchain.block_expected)
 
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
-        response = await sync_to_async(self.client.post)(f"/api/submit/", data=self.data, format="json")
+        response = await sync_to_async(self.client.post)(
+            f"/api/submit/", data=self.data, format="json"
+        )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 1)
 
-        m = (await sync_to_async(Manuscript.objects.latest)("pk"))
+        m = await sync_to_async(Manuscript.objects.latest)("pk")
 
         self.assertEqual(m.title, self.data["title"])
         self.assertEqual(m.claim_name, self.data["claim_name"])
         self.assertEqual(m.author_list, self.data["author_list"])
 
-        self.assertEqual(await sync_to_async(Manuscript.objects.filter(corresponding_author__channel_name=self.data["corresponding_author"]).count)(), 1)
+        self.assertEqual(
+            await sync_to_async(
+                Manuscript.objects.filter(
+                    corresponding_author__channel_name=self.data["corresponding_author"]
+                ).count
+            )(),
+            1,
+        )
 
     async def test_post_manuscript_valid_encrypted(self):
         file_path = os.path.join(TESTS_DIR, "data", "document1.pdf")
@@ -162,25 +175,35 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
         await self.ledger.wait(ret["tx"], self.blockchain.block_expected)
 
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
-        response = await sync_to_async(self.client.post)(f"/api/submit/", data=self.data, format="json")
+        response = await sync_to_async(self.client.post)(
+            f"/api/submit/", data=self.data, format="json"
+        )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 1)
 
-        m = (await sync_to_async(Manuscript.objects.latest)("pk"))
+        m = await sync_to_async(Manuscript.objects.latest)("pk")
 
         self.assertEqual(m.title, self.data["title"])
         self.assertEqual(m.claim_name, self.data["claim_name"])
         self.assertEqual(m.author_list, self.data["author_list"])
 
-        self.assertEqual(await sync_to_async(Manuscript.objects.filter(corresponding_author__channel_name=self.data["corresponding_author"]).count)(), 1)
+        self.assertEqual(
+            await sync_to_async(
+                Manuscript.objects.filter(
+                    corresponding_author__channel_name=self.data["corresponding_author"]
+                ).count
+            )(),
+            1,
+        )
 
     async def test_post_manuscript_no_claim(self):
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
-        response = await sync_to_async(self.client.post)(f"/api/submit/", data=self.data, format="json")
+        response = await sync_to_async(self.client.post)(
+            f"/api/submit/", data=self.data, format="json"
+        )
         self.assertEqual(response.status_code, 404)
-        self.assertIn('error', response.data)
+        self.assertIn("error", response.data)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
-
 
     async def test_post_manuscript_wrong_title(self):
         file_path = os.path.join(TESTS_DIR, "data", "document1.pdf")
@@ -201,10 +224,12 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
 
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
         data = self.data.copy()
-        data['title'] = "Our paper"
-        response = await sync_to_async(self.client.post)(f"/api/submit/", data=data, format="json")
+        data["title"] = "Our paper"
+        response = await sync_to_async(self.client.post)(
+            f"/api/submit/", data=data, format="json"
+        )
         self.assertEqual(response.status_code, 400)
-        self.assertIn('error', response.data)
+        self.assertIn("error", response.data)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
 
     async def test_post_manuscript_wrong_author(self):
@@ -226,10 +251,12 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
 
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
         data = self.data.copy()
-        data['author_list'] = "Bob Tremblay"
-        response = await sync_to_async(self.client.post)(f"/api/submit/", data=data, format="json")
+        data["author_list"] = "Bob Tremblay"
+        response = await sync_to_async(self.client.post)(
+            f"/api/submit/", data=data, format="json"
+        )
         self.assertEqual(response.status_code, 400)
-        self.assertIn('error', response.data)
+        self.assertIn("error", response.data)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
 
     async def test_post_manuscript_wrong_author_encrypted(self):
@@ -251,10 +278,12 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
 
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
         data = self.data.copy()
-        data['author_list'] = "Bob Tremblay"
-        response = await sync_to_async(self.client.post)(f"/api/submit/", data=data, format="json")
+        data["author_list"] = "Bob Tremblay"
+        response = await sync_to_async(self.client.post)(
+            f"/api/submit/", data=data, format="json"
+        )
         self.assertEqual(response.status_code, 400)
-        self.assertIn('error', response.data)
+        self.assertIn("error", response.data)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
 
     async def test_post_manuscript_other_channel_same_daemon(self):
@@ -283,18 +312,21 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
         )
         self.assertEqual(response.status_code, 201)
 
-        researcher = await sync_to_async(Researcher.objects.get)(channel_name="@BTremblay")
+        researcher = await sync_to_async(Researcher.objects.get)(
+            channel_name="@BTremblay"
+        )
 
         token = RefreshToken.for_user(researcher)
         headers = {"HTTP_AUTHORIZATION": f"Bearer {str(token.access_token)}"}
         client = APIClient(**headers)
 
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
-        response = await sync_to_async(client.post)(f"/api/submit/", data=self.data, format="json")
+        response = await sync_to_async(client.post)(
+            f"/api/submit/", data=self.data, format="json"
+        )
         self.assertEqual(response.status_code, 403)
-        self.assertIn('error', response.data)
+        self.assertIn("error", response.data)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
-
 
 
 class CompleteIntegrationTests(PaprDaemonAPITestCase):
@@ -339,6 +371,93 @@ class CompleteIntegrationTests(PaprDaemonAPITestCase):
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
 
         with self.mock_server():
-            response = await self.daemon.papr_article_request_review("my-paper", "Test Review Server")
+            response = await self.daemon.papr_article_request_review(
+                "my-paper", "Test Review Server"
+            )
 
+        self.assertEqual(response["status_code"], 201)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 1)
+
+    async def test_submit_for_review_invalid_manuscript(self):
+        with self.mock_server():
+            data = await self.daemon.papr_server_add("http://reviewserver.org")
+
+        file_path = os.path.join(TESTS_DIR, "data", "document1.pdf")
+
+        ret = await self.daemon.papr_article_create(
+            base_claim_name="my-paper",
+            bid="0.001",
+            file_path=file_path,
+            title="My paper",
+            abstract="we did great stuff",
+            authors="Robert Tremblay",
+            tags=["test"],
+            encrypt=False,
+        )
+
+        await self.generate(1)
+        await self.ledger.wait(ret["tx"], self.blockchain.block_expected)
+
+        self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
+
+        with self.mock_server():
+            response = await self.daemon.papr_article_request_review(
+                "my-manuscript", "Test Review Server"
+            )
+
+        self.assertIn("error", response)
+        self.assertIn("no such article found", response["error"])
+        self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
+
+    async def test_submit_for_review_invalid_claim(self):
+        with self.mock_server():
+            data = await self.daemon.papr_server_add("http://reviewserver.org")
+
+        file_path = os.path.join(TESTS_DIR, "data", "document1.pdf")
+
+        ret = await self.daemon.papr_article_create(
+            base_claim_name="my-paper",
+            bid="0.001",
+            file_path=file_path,
+            title="My paper",
+            abstract="we did great stuff",
+            authors="Robert Tremblay",
+            tags=["test"],
+            encrypt=False,
+        )
+
+        await self.generate(1)
+        await self.ledger.wait(ret["tx"], self.blockchain.block_expected)
+
+        self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
+
+        with Session(self.daemon.engine) as session:
+            art = ClientArticle(
+                base_claim_name="my-manuscript",
+                channel_name="@RTremblay",
+                reviewed=False,
+                revision=0,
+            )
+            man = ClientManuscript(
+                claim_name="my-manuscript",
+                bid="1.0",
+                title="My paper",
+                abstract="we did great stuff",
+                authors="Robert Tremblay",
+                tags="test",
+                article=art,
+            )
+
+            session.add(man)
+            session.add(art)
+            session.commit()
+
+        with self.mock_server():
+            response = await self.daemon.papr_article_request_review(
+                "my-manuscript", "Test Review Server"
+            )
+
+        self.assertIn("error", response)
+        self.assertIn("status_code", response)
+        self.assertEqual(response["status_code"], 404)
+        self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
