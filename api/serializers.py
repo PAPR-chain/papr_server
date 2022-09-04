@@ -1,14 +1,21 @@
-from rest_framework.serializers import ModelSerializer, SlugRelatedField
+from rest_framework.serializers import ModelSerializer, SlugRelatedField, SerializerMethodField, ValidationError, RelatedField
 
-from .models import Manuscript, Researcher, Review, ReviewerRecommendation
+from api.models import Manuscript, SubmittedArticle, Researcher, Review, ReviewerRecommendation
 
 class ManuscriptSerializer(ModelSerializer):
-    corresponding_author = SlugRelatedField(many=False, slug_field='channel_name', queryset=Researcher.objects.all())
+    article = SlugRelatedField(many=False, slug_field="base_claim_name", queryset=SubmittedArticle.objects.all())
 
     class Meta:
         model = Manuscript
-        fields = ['title', 'claim_name', 'author_list', 'status', 'corresponding_author']
+        fields = ['title', 'claim_name', 'authors', 'abstract', 'article']
 
+class SubmittedArticleSerializer(ModelSerializer):
+    corresponding_author = SlugRelatedField(many=False, slug_field='channel_name', queryset=Researcher.objects.all())
+
+    class Meta:
+        model = SubmittedArticle
+        fields = ['base_claim_name', 'corresponding_author', 'revision']
+        read_only_fields = ['reviewed', 'status']
 
 class ResearcherSerializer(ModelSerializer):
     class Meta:

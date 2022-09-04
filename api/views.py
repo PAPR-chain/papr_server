@@ -1,6 +1,7 @@
 import asyncio
 import time
 import lbry
+import logging
 
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
@@ -14,63 +15,86 @@ from rest_framework.decorators import (
 from rest_framework.response import Response
 
 from papr.cli import call
+from papr.utilities import DualLogger
 
-from api.models import Manuscript, Review, Manuscript, ReviewerRecommendation, Researcher
-from api.serializers import ManuscriptSerializer, ResearcherSerializer
+from api.models import Review, Manuscript, ReviewerRecommendation, Researcher, SubmittedArticle
+from api.serializers import ManuscriptSerializer, ResearcherSerializer, SubmittedArticleSerializer
 
 from papr_server.settings import PAPR_SERVER_NAME, PAPR_SERVER_CHANNEL_NAME
+
+logger = DualLogger(logging.getLogger(__name__))
 
 SERVER_DESC = {
             "name": PAPR_SERVER_NAME,
             "channel_name": PAPR_SERVER_CHANNEL_NAME,
 }
 
-@api_view(["GET"])
-def manuscript_list(request):
-    if request.method == "GET":
-        manuscripts = Manuscript.objects.all().order_by("-id")[:50]
-        serializer = ManuscriptSerializer(manuscripts, many=True)
-        return Response(serializer.data)
-
 
 @api_view(["GET"])
-def manuscript(request, claim_name):
+def article_status(request, base_claim_name):
     if request.method == "GET":
         try:
-            manuscript = Manuscript.objects.get(claim_name=claim_name)
+            article = SubmittedArticle.objects.get(base_claim_name=base_claim_name)
         except Manuscript.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        serializer = ManuscriptSerializer(manuscript)
+        if article.corresponding_author.channel_name != request.auth["researcher_id"]:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        serializer = SubmittedArticleSerializer(article)
         return Response(serializer.data)
 
 
 @api_view(["POST"])
 def submit(request):
+    """
+    Submit a manuscript for peer-review mediated by this server.
+    The manuscript is already published on the LBRY blockchain.
+    It can be a preprint or a new revision of an article under review.
+    """
     if request.method == "POST":
         if "corresponding_author" not in request.data:
             return Response(status=status.HTTP_400_BAD_REQUEST)
         if request.data["corresponding_author"] != request.auth["researcher_id"]:
-            return Response({'error': "You are not authenticated as the corresponding author of the publication"}, status=status.HTTP_403_FORBIDDEN)
+            return Response(logger.error("You are not authenticated as the corresponding author of the publication"), status=status.HTTP_403_FORBIDDEN)
 
-        serializer = ManuscriptSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if 'revision' not in request.data:
+            return Response(logger.error("You must submit a revision number"), status=status.HTTP_400_BAD_REQUEST)
+
+        base_claim_name = request.data["article"]
+        request.data["base_claim_name"] = base_claim_name
+        try:
+            article = SubmittedArticle.objects.get(base_claim_name=base_claim_name)
+        except SubmittedArticle.DoesNotExist:
+            art_ser = SubmittedArticleSerializer(data=request.data)
+            if not art_ser.is_valid():
+                return Response(art_ser.errors, status=status.HTTP_400_BAD_REQUEST)
+            art_ser.save()
+        else:
+            if request.data["revision"] == 0 and article.status != 0:
+                return Response(logger.error("An article with the given base claim name already exists. Submit a revision instead."), status=status.HTTP_400_BAD_REQUEST)
+
+        man_ser = ManuscriptSerializer(data=request.data)
+        if not man_ser.is_valid():
+            return Response(man_ser.errors, status=status.HTTP_400_BAD_REQUEST)
 
         res = call("resolve", urls=request.data["claim_name"]).json()
         if request.data["claim_name"] not in res['result'] or 'error' in res['result'][request.data["claim_name"]]:
-            return Response({'error': "Publication not found on the blockchain"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(logger.error("Publication not found on the blockchain"), status=status.HTTP_404_NOT_FOUND)
 
         pub_data = res['result'][request.data["claim_name"]]
 
+        if 'is_channel_signature_valid' not in pub_data or not pub_data['is_channel_signature_valid'] or pub_data['signing_channel']['name'] != request.auth["researcher_id"]:
+            return Response(logger.error("The submitted manuscript is not signed by the authenticated channel"), status=status.HTTP_400_BAD_REQUEST)
+
         if pub_data['value']['title'] != request.data["title"]:
-            return Response({'error': "The submitted title does not match the title of the publication"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(logger.error("The submitted title does not match the title of the publication"), status=status.HTTP_400_BAD_REQUEST)
 
-        if pub_data['value']['author'] != request.data["author_list"]:
-            return Response({'error': "The submitted author list does not match the author list of the publication"}, status=status.HTTP_400_BAD_REQUEST)
+        if pub_data['value']['author'] != request.data["authors"]:
+            return Response(logger.error("The submitted author list does not match the author list of the publication"), status=status.HTTP_400_BAD_REQUEST)
 
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        man_ser.save()
+        return Response(man_ser.data, status=status.HTTP_201_CREATED)
 
 
 @api_view(["POST"])

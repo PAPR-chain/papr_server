@@ -23,7 +23,7 @@ from papr.utilities import file_sha256
 from papr.models import Article as ClientArticle
 from papr.models import Manuscript as ClientManuscript
 
-from api.models import Researcher, Manuscript
+from api.models import Researcher, Manuscript, SubmittedArticle
 from api.views import submit, register
 from papr_server.testcase import PaprDaemonAPITestCase
 
@@ -93,9 +93,11 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
         super().setUpClass()
         cls.data = {
             "title": "My paper",
+            "article": "my-paper",
             "claim_name": "my-paper_preprint",
-            "author_list": "Robert Tremblay",
+            "authors": "Robert Tremblay",
             "corresponding_author": "@RTremblay",
+            "revision": 1,
         }
 
     async def asyncSetUp(self):
@@ -104,6 +106,7 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
         tx = await self.daemon.jsonrpc_channel_create("@RTremblay", bid="1.0")
         await self.generate(1)
         await self.ledger.wait(tx, self.blockchain.block_expected)
+        await self.daemon.channel_load("@RTremblay")
 
         response = await sync_to_async(self.client.post)(
             "/api/register/", format="json", data={"channel_name": "@RTremblay"}
@@ -146,11 +149,11 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
 
         self.assertEqual(m.title, self.data["title"])
         self.assertEqual(m.claim_name, self.data["claim_name"])
-        self.assertEqual(m.author_list, self.data["author_list"])
+        self.assertEqual(m.authors, self.data["authors"])
 
         self.assertEqual(
             await sync_to_async(
-                Manuscript.objects.filter(
+                SubmittedArticle.objects.filter(
                     corresponding_author__channel_name=self.data["corresponding_author"]
                 ).count
             )(),
@@ -185,11 +188,11 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
 
         self.assertEqual(m.title, self.data["title"])
         self.assertEqual(m.claim_name, self.data["claim_name"])
-        self.assertEqual(m.author_list, self.data["author_list"])
+        self.assertEqual(m.authors, self.data["authors"])
 
         self.assertEqual(
             await sync_to_async(
-                Manuscript.objects.filter(
+                SubmittedArticle.objects.filter(
                     corresponding_author__channel_name=self.data["corresponding_author"]
                 ).count
             )(),
@@ -251,7 +254,7 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
 
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
         data = self.data.copy()
-        data["author_list"] = "Bob Tremblay"
+        data["authors"] = "Bob Tremblay"
         response = await sync_to_async(self.client.post)(
             f"/api/submit/", data=data, format="json"
         )
@@ -278,7 +281,7 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
 
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
         data = self.data.copy()
-        data["author_list"] = "Bob Tremblay"
+        data["authors"] = "Bob Tremblay"
         response = await sync_to_async(self.client.post)(
             f"/api/submit/", data=data, format="json"
         )
@@ -336,7 +339,7 @@ class CompleteIntegrationTests(PaprDaemonAPITestCase):
         cls.data = {
             "title": "My paper",
             "claim_name": "my-paper_preprint",
-            "author_list": "Robert Tremblay",
+            "authors": "Robert Tremblay",
             "corresponding_author": "@RTremblay",
         }
 
@@ -363,12 +366,14 @@ class CompleteIntegrationTests(PaprDaemonAPITestCase):
             authors="Robert Tremblay",
             tags=["test"],
             encrypt=False,
+            server_name="Test Review Server",
         )
 
         await self.generate(1)
         await self.ledger.wait(ret["tx"], self.blockchain.block_expected)
 
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
+        self.assertEqual(await sync_to_async(SubmittedArticle.objects.count)(), 0)
 
         with self.mock_server():
             response = await self.daemon.papr_article_request_review(
@@ -377,6 +382,14 @@ class CompleteIntegrationTests(PaprDaemonAPITestCase):
 
         self.assertEqual(response["status_code"], 201)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 1)
+        self.assertEqual(await sync_to_async(SubmittedArticle.objects.count)(), 1)
+
+        with self.mock_server():
+            response = await self.daemon.papr_article_status(
+                "my-paper"
+            )
+        self.assertIn('article', response)
+        self.assertEqual(response['article']['revision'], 0)
 
     async def test_submit_for_review_invalid_manuscript(self):
         with self.mock_server():
@@ -461,3 +474,4 @@ class CompleteIntegrationTests(PaprDaemonAPITestCase):
         self.assertIn("status_code", response)
         self.assertEqual(response["status_code"], 404)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
+

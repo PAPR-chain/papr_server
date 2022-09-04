@@ -2,8 +2,8 @@ from django.urls import path
 from api import views
 
 urlpatterns = [
-        path('manuscripts/', views.manuscript_list),
-        path('manuscripts/<str:claim_name>', views.manuscript),
+        #path('manuscripts/', views.manuscript_list),
+        path('status/<str:base_claim_name>', views.article_status),
         path('register/', views.register),
         path('submit/', views.submit),
         path('accept/', views.accept),

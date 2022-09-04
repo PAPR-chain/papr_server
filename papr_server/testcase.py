@@ -34,6 +34,7 @@ class PaprDaemonAPITestCase(PaprDaemonTestCase):
             await self.daemon.start()
             # PaprDaemonTestCase and APITestCase don't play nice with each other,
             # it is thus necessary to manually handle the test database.
+            await sync_to_async(call_command)("makemigrations")
             await sync_to_async(call_command)("migrate")
 
     async def asyncTearDown(self):
