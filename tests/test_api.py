@@ -39,7 +39,7 @@ class AuthenticationTests(APITestCase):
         pass
 
     def test_get_manuscript_unauth(self):
-        response = self.client.get("/api/status/paper-tremblay", format="json")
+        response = self.client.get("/api/article/status/paper-tremblay", format="json")
         self.assertEqual(response.status_code, 401)
         self.assertEqual(
             response.json()["detail"], "Authentication credentials were not provided."
@@ -63,7 +63,7 @@ class AuthenticationTests(APITestCase):
         )
 
         response = self.client.get(
-            "/api/status/paper-tremblay",
+            "/api/article/status/paper-tremblay",
             format="json",
             HTTP_AUTHORIZATION="Bearer " + token_access,
         )
@@ -100,7 +100,7 @@ class AuthenticationTests(APITestCase):
         # The Daemon is required for this action, but is not running
         with self.assertRaises(requests.exceptions.ConnectionError):
             response = self.client.post(
-                "/api/submit/",
+                "/api/article/submit",
                 data=data,
                 format="json",
                 HTTP_AUTHORIZATION="Bearer " + token_access,
@@ -129,7 +129,7 @@ class AuthenticationTests(APITestCase):
         }
         self.assertEqual(Manuscript.objects.count(), 1)
         response = self.client.post(
-            "/api/submit/",
+            "/api/article/submit",
             data=data,
             format="json",
             HTTP_AUTHORIZATION="Bearer " + token_access,
@@ -155,7 +155,7 @@ class AuthenticationTests(APITestCase):
         }
         self.assertEqual(Manuscript.objects.count(), 1)
         response = self.client.post(
-            "/api/submit/",
+            "/api/article/submit",
             data=data,
             format="json",
             HTTP_AUTHORIZATION="Bearer " + token_access,

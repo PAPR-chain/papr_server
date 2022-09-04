@@ -7,6 +7,7 @@ from io import StringIO
 from asgiref.sync import sync_to_async
 
 from aioresponses import CallbackResult, aioresponses
+import django
 from django.http import HttpRequest
 from django.urls import resolve
 from django.core.management import call_command
@@ -64,7 +65,10 @@ class PaprDaemonAPITestCase(PaprDaemonTestCase):
         for k, v in self.daemon.headers.items():
             request.META[k] = v
 
-        res = resolve(request.path)
+        try:
+            res = resolve(request.path)
+        except django.urls.exceptions.Resolver404:
+            raise Exception(f"Could not resolve {request.path}")
 
         resp = await sync_to_async(res.func)(request, *res.args, **res.kwargs)
         if isinstance(resp, Response):

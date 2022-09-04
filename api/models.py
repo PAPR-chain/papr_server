@@ -4,6 +4,7 @@ from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 
 from .managers import ResearcherManager
 
+
 class Researcher(AbstractBaseUser, PermissionsMixin):
     channel_name = models.CharField(max_length=255, unique=True)
 
@@ -12,7 +13,7 @@ class Researcher(AbstractBaseUser, PermissionsMixin):
     public_key = models.CharField(max_length=316, null=True)
     email = models.EmailField(null=True, validators=[EmailValidator])
 
-    USERNAME_FIELD = 'channel_name'
+    USERNAME_FIELD = "channel_name"
     REQUIRED_FIELDS = []
 
     objects = ResearcherManager()
@@ -24,16 +25,20 @@ class Researcher(AbstractBaseUser, PermissionsMixin):
     def __str__(self):
         return self.channel_name
 
+
 class Review(models.Model):
     submitted = models.DateTimeField(auto_now_add=True)
-    text = models.TextField(max_length=4194304) # 4 MB
+    text = models.TextField(max_length=4194304)  # 4 MB
     reviewer = models.ForeignKey(Researcher, on_delete=models.SET_NULL, null=True)
-    manuscript = models.ForeignKey('Manuscript', on_delete=models.SET_NULL, null=True)
+    manuscript = models.ForeignKey("Manuscript", on_delete=models.SET_NULL, null=True)
     rating = models.PositiveSmallIntegerField(default=0)
+
 
 class SubmittedArticle(models.Model):
     base_claim_name = models.CharField(max_length=255, unique=True)
-    corresponding_author = models.ForeignKey(Researcher, on_delete=models.SET_NULL, null=True)
+    corresponding_author = models.ForeignKey(
+        Researcher, on_delete=models.SET_NULL, null=True
+    )
 
     encryption_passphrase = models.CharField(max_length=1024)
     review_passphrase = models.CharField(max_length=1024)
@@ -56,7 +61,7 @@ class SubmittedArticle(models.Model):
 
     @property
     def latest_manuscript(self):
-        return self.manuscript_set.latest('submitted')
+        return self.manuscript_set.latest("submitted")
 
     @property
     def title(self):
@@ -74,10 +79,11 @@ class SubmittedArticle(models.Model):
     def tags(self):
         return self.latest_manuscript.tags
 
+
 class Manuscript(models.Model):
     submitted = models.DateTimeField(auto_now_add=True)
     claim_name = models.CharField(max_length=255, unique=True)
-    #claim_id = models.CharField(max_length=40, unique=True)
+    # claim_id = models.CharField(max_length=40, unique=True)
     title = models.TextField(max_length=1024)
     authors = models.TextField(max_length=1024)
     tags = models.TextField(max_length=1024, default="")
@@ -89,13 +95,46 @@ class Manuscript(models.Model):
     encrypted = models.BooleanField(default=False)
     encryption_password = models.CharField(max_length=1024, null=True)
 
-    article = models.ForeignKey(SubmittedArticle, related_name="version", on_delete=models.SET_NULL, null=True)
-
+    article = models.ForeignKey(
+        SubmittedArticle, related_name="version", on_delete=models.SET_NULL, null=True
+    )
 
 
 class ReviewerRecommendation(models.Model):
     submitted = models.DateTimeField(auto_now_add=True)
-    reviewer = models.ForeignKey(Researcher, related_name="is_recommended", on_delete=models.SET_NULL, null=True)
-    voucher = models.ForeignKey(Researcher, related_name="has_recommended", on_delete=models.SET_NULL, null=True)
-    manuscript = models.ForeignKey(Manuscript, related_name="recommendations", on_delete=models.SET_NULL, null=True)
+    reviewer = models.ForeignKey(
+        Researcher, related_name="is_recommended", on_delete=models.SET_NULL, null=True
+    )
+    voucher = models.ForeignKey(
+        Researcher, related_name="has_recommended", on_delete=models.SET_NULL, null=True
+    )
+    article = models.ForeignKey(
+        SubmittedArticle,
+        related_name="recommendations",
+        on_delete=models.SET_NULL,
+        null=True,
+    )
 
+
+class ReviewRequest(models.Model):
+    submitted = models.DateTimeField(auto_now_add=True)
+    reviewer = models.ForeignKey(
+        Researcher, related_name="is_asked", on_delete=models.SET_NULL, null=True
+    )
+    article = models.ForeignKey(
+        SubmittedArticle,
+        related_name="reviewers_contacted",
+        on_delete=models.SET_NULL,
+        null=True,
+    )
+
+    # TODO: field for how the reviewer was contacted (email, server notification...)
+    status = models.PositiveSmallIntegerField(default=0)
+    """
+    Statuses:
+        0: Created, not sent
+        1: Sent, pending reply
+        2: Request declined
+        3: Request accepted, pending review
+        4: Review fulfilled
+    """

@@ -17,16 +17,26 @@ from rest_framework.response import Response
 from papr.cli import call
 from papr.utilities import DualLogger
 
-from api.models import Review, Manuscript, ReviewerRecommendation, Researcher, SubmittedArticle
-from api.serializers import ManuscriptSerializer, ResearcherSerializer, SubmittedArticleSerializer
+from api.models import (
+    Review,
+    Manuscript,
+    ReviewerRecommendation,
+    Researcher,
+    SubmittedArticle,
+)
+from api.serializers import (
+    ManuscriptSerializer,
+    ResearcherSerializer,
+    SubmittedArticleSerializer,
+)
 
 from papr_server.settings import PAPR_SERVER_NAME, PAPR_SERVER_CHANNEL_NAME
 
 logger = DualLogger(logging.getLogger(__name__))
 
 SERVER_DESC = {
-            "name": PAPR_SERVER_NAME,
-            "channel_name": PAPR_SERVER_CHANNEL_NAME,
+    "name": PAPR_SERVER_NAME,
+    "channel_name": PAPR_SERVER_CHANNEL_NAME,
 }
 
 
@@ -56,10 +66,18 @@ def submit(request):
         if "corresponding_author" not in request.data:
             return Response(status=status.HTTP_400_BAD_REQUEST)
         if request.data["corresponding_author"] != request.auth["researcher_id"]:
-            return Response(logger.error("You are not authenticated as the corresponding author of the publication"), status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                logger.error(
+                    "You are not authenticated as the corresponding author of the publication"
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
-        if 'revision' not in request.data:
-            return Response(logger.error("You must submit a revision number"), status=status.HTTP_400_BAD_REQUEST)
+        if "revision" not in request.data:
+            return Response(
+                logger.error("You must submit a revision number"),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         base_claim_name = request.data["article"]
         request.data["base_claim_name"] = base_claim_name
@@ -72,45 +90,161 @@ def submit(request):
             art_ser.save()
         else:
             if request.data["revision"] == 0 and article.status != 0:
-                return Response(logger.error("An article with the given base claim name already exists. Submit a revision instead."), status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    logger.error(
+                        "An article with the given base claim name already exists. Submit a revision instead."
+                    ),
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         man_ser = ManuscriptSerializer(data=request.data)
         if not man_ser.is_valid():
             return Response(man_ser.errors, status=status.HTTP_400_BAD_REQUEST)
 
         res = call("resolve", urls=request.data["claim_name"]).json()
-        if request.data["claim_name"] not in res['result'] or 'error' in res['result'][request.data["claim_name"]]:
-            return Response(logger.error("Publication not found on the blockchain"), status=status.HTTP_404_NOT_FOUND)
+        if (
+            request.data["claim_name"] not in res["result"]
+            or "error" in res["result"][request.data["claim_name"]]
+        ):
+            return Response(
+                logger.error("Publication not found on the blockchain"),
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
-        pub_data = res['result'][request.data["claim_name"]]
+        pub_data = res["result"][request.data["claim_name"]]
 
-        if 'is_channel_signature_valid' not in pub_data or not pub_data['is_channel_signature_valid'] or pub_data['signing_channel']['name'] != request.auth["researcher_id"]:
-            return Response(logger.error("The submitted manuscript is not signed by the authenticated channel"), status=status.HTTP_400_BAD_REQUEST)
+        if (
+            "is_channel_signature_valid" not in pub_data
+            or not pub_data["is_channel_signature_valid"]
+            or pub_data["signing_channel"]["name"] != request.auth["researcher_id"]
+        ):
+            return Response(
+                logger.error(
+                    "The submitted manuscript is not signed by the authenticated channel"
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if pub_data['value']['title'] != request.data["title"]:
-            return Response(logger.error("The submitted title does not match the title of the publication"), status=status.HTTP_400_BAD_REQUEST)
+        if pub_data["value"]["title"] != request.data["title"]:
+            return Response(
+                logger.error(
+                    "The submitted title does not match the title of the publication"
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if pub_data['value']['author'] != request.data["authors"]:
-            return Response(logger.error("The submitted author list does not match the author list of the publication"), status=status.HTTP_400_BAD_REQUEST)
+        if pub_data["value"]["author"] != request.data["authors"]:
+            return Response(
+                logger.error(
+                    "The submitted author list does not match the author list of the publication"
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         man_ser.save()
         return Response(man_ser.data, status=status.HTTP_201_CREATED)
 
 
 @api_view(["POST"])
-def accept(request):
+def article_accept(request):
     if request.method == "POST":
         pass
+
+
+@api_view(["POST"])
+def reviewrequest_decline(request):
+    return _reviewrequest_modify(request, accept=false)
+
+
+@api_view(["POST"])
+def reviewrequest_accept(request):
+    return _reviewrequest_modify(request, accept=True)
+
+
+def _reviewrequest_modify(request, accept=True):
+    if request.method == "POST":
+        if "base_claim_name" not in request.data:
+            return Response(
+                logger.error("An article base claim name must be specified"),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            article = SubmittedArticle.objects.get(
+                base_claim_name=request.data["base_claim_name"]
+            )
+        except SubmittedArticle.DoesNotExist:
+            return Response(
+                logger.error(
+                    "No article with the base claim name {request.data['base_claim_name']}"
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        pending_requests = ReviewRequest.objects.filter(article=article, status=1)
+        if pending_requests.count() == 0:
+            specific_request = ReviewRequest.objects.filter(
+                article=article, reviewer__channel_name=request.auth["researcher_id"]
+            )
+            if specific_request.count() == 0:
+                return Response(
+                    logger.error(
+                        "No review was requested from channel {request.auth['researcher_id']}"
+                    ),
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            else:
+                # TODO: more details
+                return Response(
+                    logger.error("You have already replied to the review request"),
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            relevant_requests = pending_requests.filter(
+                reviewer__channel_name=request.auth["researcher_id"]
+            )
+            if relevant_requests.count() == 0:
+                return Response(
+                    logger.error(
+                        "No review was requested from channel {request.auth['researcher_id']}"
+                    ),
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            elif relevant_requests.count() == 1:
+                req = relevant_requests.first()
+                if accept:
+                    req.status = 3
+                    req.save()
+                    return Response(
+                        logger.info(
+                            "The review request has been marked as accepted, thank you!"
+                        ),
+                        status=status.HTTP_200_OK,
+                    )
+                else:
+                    req.status = 2
+                    req.save()
+                    return Response(
+                        logger.info("The review request has been marked as declined."),
+                        status=status.HTTP_200_OK,
+                    )
+            else:
+                raise Exception(
+                    f"Multiple pending requests for {request.auth['researcher_id']} and article {article.base_claim_name}, this should not happen"
+                )
+
 
 @api_view(["POST"])
 def review(request):
     if request.method == "POST":
         pass
 
+
 @api_view(["POST"])
 def recommend(request):
     if request.method == "POST":
         pass
+
 
 @api_view(["POST"])
 @authentication_classes([])
@@ -120,7 +254,7 @@ def register(request):
         return Response(status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        existing = Researcher.objects.get(channel_name=request.data['channel_name'])
+        existing = Researcher.objects.get(channel_name=request.data["channel_name"])
     except Researcher.DoesNotExist:
         pass
     else:
@@ -147,9 +281,10 @@ def register(request):
     ## Public key
 
     return JsonResponse(
-            SERVER_DESC,
+        SERVER_DESC,
         status=status.HTTP_201_CREATED,
     )
+
 
 @api_view(["GET"])
 @authentication_classes([])
@@ -160,11 +295,11 @@ def info(request):
         status=status.HTTP_200_OK,
     )
 
+
 @api_view(["POST"])
 def update_contact(request):
     """
-        Updates the full name and email of a Researcher account/object.
-        Requires the client to be authenticated as this Researcher.
+    Updates the full name and email of a Researcher account/object.
+    Requires the client to be authenticated as this Researcher.
     """
     pass
-

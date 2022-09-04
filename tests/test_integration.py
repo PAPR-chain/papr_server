@@ -38,7 +38,7 @@ class RegisterTests(PaprDaemonAPITestCase):
 
         self.assertEqual(await sync_to_async(Researcher.objects.count)(), 0)
         response = await sync_to_async(self.client.post)(
-            "/api/register/", format="json", data={"channel_name": "@RTremblay"}
+            "/api/channel/register", format="json", data={"channel_name": "@RTremblay"}
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(await sync_to_async(Researcher.objects.count)(), 1)
@@ -63,7 +63,7 @@ class RegisterTests(PaprDaemonAPITestCase):
         )
         token = RefreshToken.for_user(researcher)
         response = await sync_to_async(self.client.post)(
-            "/api/register/",
+            "/api/channel/register",
             format="json",
             data={"channel_name": "@RTremblay"},
             headers={"HTTP_AUTHORIZATION": f"Bearer {str(token.access_token)}"},
@@ -73,7 +73,7 @@ class RegisterTests(PaprDaemonAPITestCase):
     async def test_register_nonexistent_channel(self):
         self.assertEqual(await sync_to_async(Researcher.objects.count)(), 0)
         response = await sync_to_async(self.client.post)(
-            "/api/register/", format="json", data={"channel_name": "@RTremblay"}
+            "/api/channel/register", format="json", data={"channel_name": "@RTremblay"}
         )
         self.assertEqual(response.status_code, 404)
         self.assertEqual(await sync_to_async(Researcher.objects.count)(), 0)
@@ -109,7 +109,7 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
         await self.daemon.channel_load("@RTremblay")
 
         response = await sync_to_async(self.client.post)(
-            "/api/register/", format="json", data={"channel_name": "@RTremblay"}
+            "/api/channel/register", format="json", data={"channel_name": "@RTremblay"}
         )
         self.assertEqual(response.status_code, 201)
 
@@ -140,7 +140,7 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
 
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
         response = await sync_to_async(self.client.post)(
-            f"/api/submit/", data=self.data, format="json"
+            f"/api/article/submit", data=self.data, format="json"
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 1)
@@ -179,7 +179,7 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
 
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
         response = await sync_to_async(self.client.post)(
-            f"/api/submit/", data=self.data, format="json"
+            f"/api/article/submit", data=self.data, format="json"
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 1)
@@ -202,7 +202,7 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
     async def test_post_manuscript_no_claim(self):
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
         response = await sync_to_async(self.client.post)(
-            f"/api/submit/", data=self.data, format="json"
+            f"/api/article/submit", data=self.data, format="json"
         )
         self.assertEqual(response.status_code, 404)
         self.assertIn("error", response.data)
@@ -229,7 +229,7 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
         data = self.data.copy()
         data["title"] = "Our paper"
         response = await sync_to_async(self.client.post)(
-            f"/api/submit/", data=data, format="json"
+            f"/api/article/submit", data=data, format="json"
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.data)
@@ -256,7 +256,7 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
         data = self.data.copy()
         data["authors"] = "Bob Tremblay"
         response = await sync_to_async(self.client.post)(
-            f"/api/submit/", data=data, format="json"
+            f"/api/article/submit", data=data, format="json"
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.data)
@@ -283,7 +283,7 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
         data = self.data.copy()
         data["authors"] = "Bob Tremblay"
         response = await sync_to_async(self.client.post)(
-            f"/api/submit/", data=data, format="json"
+            f"/api/article/submit", data=data, format="json"
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.data)
@@ -311,7 +311,7 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
         await self.ledger.wait(tx, self.blockchain.block_expected)
 
         response = await sync_to_async(self.client.post)(
-            "/api/register/", format="json", data={"channel_name": "@BTremblay"}
+            "/api/channel/register", format="json", data={"channel_name": "@BTremblay"}
         )
         self.assertEqual(response.status_code, 201)
 
@@ -325,7 +325,7 @@ class SubmitManuscriptTests(PaprDaemonAPITestCase):
 
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
         response = await sync_to_async(client.post)(
-            f"/api/submit/", data=self.data, format="json"
+            f"/api/article/submit", data=self.data, format="json"
         )
         self.assertEqual(response.status_code, 403)
         self.assertIn("error", response.data)
