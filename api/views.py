@@ -28,6 +28,8 @@ from api.serializers import (
     ManuscriptSerializer,
     ResearcherSerializer,
     SubmittedArticleSerializer,
+    ReviewSerializer,
+    ReviewerRecommendationSerializer,
 )
 
 from papr_server.settings import PAPR_SERVER_NAME, PAPR_SERVER_CHANNEL_NAME
@@ -37,22 +39,22 @@ logger = DualLogger(logging.getLogger(__name__))
 SERVER_DESC = {
     "name": PAPR_SERVER_NAME,
     "channel_name": PAPR_SERVER_CHANNEL_NAME,
+    # url?
 }
 
 
 @api_view(["GET"])
 def article_status(request, base_claim_name):
-    if request.method == "GET":
-        try:
-            article = SubmittedArticle.objects.get(base_claim_name=base_claim_name)
-        except Manuscript.DoesNotExist:
-            return Response(status=status.HTTP_404_NOT_FOUND)
+    try:
+        article = SubmittedArticle.objects.get(base_claim_name=base_claim_name)
+    except Manuscript.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
 
-        if article.corresponding_author.channel_name != request.auth["researcher_id"]:
-            return Response(status=status.HTTP_403_FORBIDDEN)
+    if article.corresponding_author.channel_name != request.auth["researcher_id"]:
+        return Response(status=status.HTTP_403_FORBIDDEN)
 
-        serializer = SubmittedArticleSerializer(article)
-        return Response(serializer.data)
+    serializer = SubmittedArticleSerializer(article)
+    return Response(serializer.data)
 
 
 @api_view(["POST"])
@@ -147,8 +149,8 @@ def submit(request):
 
 @api_view(["POST"])
 def article_accept(request):
-    if request.method == "POST":
-        pass
+    # TODO
+    pass
 
 
 @api_view(["POST"])
@@ -162,88 +164,136 @@ def reviewrequest_accept(request):
 
 
 def _reviewrequest_modify(request, accept=True):
-    if request.method == "POST":
-        if "base_claim_name" not in request.data:
-            return Response(
-                logger.error("An article base claim name must be specified"),
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+    if "base_claim_name" not in request.data:
+        return Response(
+            logger.error("An article base claim name must be specified"),
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-        try:
-            article = SubmittedArticle.objects.get(
-                base_claim_name=request.data["base_claim_name"]
-            )
-        except SubmittedArticle.DoesNotExist:
+    try:
+        article = SubmittedArticle.objects.get(
+            base_claim_name=request.data["base_claim_name"]
+        )
+    except SubmittedArticle.DoesNotExist:
+        return Response(
+            logger.error(
+                "No article with the base claim name {request.data['base_claim_name']}"
+            ),
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    pending_requests = ReviewRequest.objects.filter(article=article, status=1)
+    if pending_requests.count() == 0:
+        specific_request = ReviewRequest.objects.filter(
+            article=article, reviewer__channel_name=request.auth["researcher_id"]
+        )
+        if specific_request.count() == 0:
             return Response(
                 logger.error(
-                    "No article with the base claim name {request.data['base_claim_name']}"
+                    "No review was requested from channel {request.auth['researcher_id']}"
                 ),
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        pending_requests = ReviewRequest.objects.filter(article=article, status=1)
-        if pending_requests.count() == 0:
-            specific_request = ReviewRequest.objects.filter(
-                article=article, reviewer__channel_name=request.auth["researcher_id"]
+        else:
+            # TODO: more details
+            return Response(
+                logger.error("You have already replied to the review request"),
+                status=status.HTTP_400_BAD_REQUEST,
             )
-            if specific_request.count() == 0:
+    else:
+        relevant_requests = pending_requests.filter(
+            reviewer__channel_name=request.auth["researcher_id"]
+        )
+        if relevant_requests.count() == 0:
+            return Response(
+                logger.error(
+                    "No review was requested from channel {request.auth['researcher_id']}"
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        elif relevant_requests.count() == 1:
+            req = relevant_requests.first()
+            if accept:
+                req.status = 3
+                req.save()
                 return Response(
-                    logger.error(
-                        "No review was requested from channel {request.auth['researcher_id']}"
+                    logger.info(
+                        "The review request has been marked as accepted, thank you!"
                     ),
-                    status=status.HTTP_400_BAD_REQUEST,
+                    status=status.HTTP_200_OK,
                 )
             else:
-                # TODO: more details
+                req.status = 2
+                req.save()
                 return Response(
-                    logger.error("You have already replied to the review request"),
-                    status=status.HTTP_400_BAD_REQUEST,
+                    logger.info("The review request has been marked as declined."),
+                    status=status.HTTP_200_OK,
                 )
         else:
-            relevant_requests = pending_requests.filter(
-                reviewer__channel_name=request.auth["researcher_id"]
+            raise Exception(
+                f"Multiple pending requests for {request.auth['researcher_id']} and article {article.base_claim_name}, this should not happen"
             )
-            if relevant_requests.count() == 0:
-                return Response(
-                    logger.error(
-                        "No review was requested from channel {request.auth['researcher_id']}"
-                    ),
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            elif relevant_requests.count() == 1:
-                req = relevant_requests.first()
-                if accept:
-                    req.status = 3
-                    req.save()
-                    return Response(
-                        logger.info(
-                            "The review request has been marked as accepted, thank you!"
-                        ),
-                        status=status.HTTP_200_OK,
-                    )
-                else:
-                    req.status = 2
-                    req.save()
-                    return Response(
-                        logger.info("The review request has been marked as declined."),
-                        status=status.HTTP_200_OK,
-                    )
-            else:
-                raise Exception(
-                    f"Multiple pending requests for {request.auth['researcher_id']} and article {article.base_claim_name}, this should not happen"
-                )
 
 
 @api_view(["POST"])
 def review(request):
-    if request.method == "POST":
-        pass
+    # Prevent the user from getting information about reviewers
+    if "reviewer" in request.data:
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = ReviewSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    man = Manuscript.objects.get(claim_name=request.data["manuscript"])
+    pending_reviews = man.article.reviewers_contacted.filter(
+        status=3, reviewer__channel_name=request.auth["researcher_id"]
+    )
+    if pending_reviews.count() == 0:
+        return Response(
+            logger.error(
+                f"No review was requested from channel {request.auth['researcher_id']} for article {man.article}"
+            ),
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    elif pending_reviews.count() == 1:
+        req = pending_reviews.first()
+        req.status = 4
+        req.save()
+    else:
+        raise Exception(
+            f"Multiple pending requests for {request.auth['researcher_id']} and article {article.base_claim_name}, this should not happen"
+        )
+
+    serializer.save(reviewer=reviewer, request=req)
+
+    return Response(
+        logger.info(
+            f"Your review of {man.article.base_claim_name} (man.claim_name) has been received, thank you!"
+        ),
+        status=status.HTTP_201_CREATED,
+    )
 
 
 @api_view(["POST"])
 def recommend(request):
-    if request.method == "POST":
-        pass
+
+    # TODO: Confirm the reviewer's identity using the submitted name
+    request.data["voucher"] = request.auth["researcher_id"]
+
+    serializer = ReviewerRecommendationSerializer(data=request.data)
+    if not serializer.is_valid():
+        # TODO: handle reviewers which are not registered to that review server
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer.save()
+
+    return Response(
+        logger.info(
+            f"Your review recommendation for {request.data['article']} has been received, thank you!"
+        ),
+        status=status.HTTP_201_CREATED,
+    )
 
 
 @api_view(["POST"])
@@ -302,4 +352,5 @@ def update_contact(request):
     Updates the full name and email of a Researcher account/object.
     Requires the client to be authenticated as this Researcher.
     """
+    # TODO
     pass

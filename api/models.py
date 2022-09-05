@@ -31,7 +31,17 @@ class Review(models.Model):
     text = models.TextField(max_length=4194304)  # 4 MB
     reviewer = models.ForeignKey(Researcher, on_delete=models.SET_NULL, null=True)
     manuscript = models.ForeignKey("Manuscript", on_delete=models.SET_NULL, null=True)
-    rating = models.PositiveSmallIntegerField(default=0)
+    rating = models.PositiveSmallIntegerField()
+
+    signature = models.CharField(max_length=1024)
+    signing_ts = models.CharField(max_length=1024)
+
+    request = models.ForeignKey(
+        "ReviewRequest",
+        related_name="final_review",
+        on_delete=models.SET_NULL,
+        null=True,
+    )
 
 
 class SubmittedArticle(models.Model):

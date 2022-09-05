@@ -23,7 +23,7 @@ from papr.utilities import file_sha256
 from papr.models import Article as ClientArticle
 from papr.models import Manuscript as ClientManuscript
 
-from api.models import Researcher, Manuscript, SubmittedArticle
+from api.models import Researcher, Manuscript, SubmittedArticle, ReviewerRecommendation, Review
 from api.views import submit, register
 from papr_server.testcase import PaprDaemonAPITestCase
 
@@ -475,3 +475,92 @@ class CompleteIntegrationTests(PaprDaemonAPITestCase):
         self.assertEqual(response["status_code"], 404)
         self.assertEqual(await sync_to_async(Manuscript.objects.count)(), 0)
 
+
+class RecommendationTests(PaprDaemonAPITestCase):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+
+        tx = await self.daemon.jsonrpc_channel_create("@RTremblay", bid="1.0")
+        await self.generate(1)
+        await self.ledger.wait(tx, self.blockchain.block_expected)
+        await self.daemon.channel_load("@RTremblay")
+
+        with self.mock_server():
+            data = await self.daemon.papr_server_add("http://reviewserver.org")
+
+        self.researcher = await sync_to_async(Researcher.objects.get)(
+            channel_name="@RTremblay"
+        )
+
+        daemon2 = await self.add_daemon()
+        addresses = await daemon2.wallet_manager.default_account.receiving.get_addresses()
+        await self.send_to_address_and_wait(addresses[0], 10, 1, ledger=daemon2.ledger)
+        tx = await daemon2.jsonrpc_channel_create("@STremblay", bid="1.0")
+        await self.generate(1)
+        await daemon2.ledger.wait(tx, self.blockchain.block_expected)
+        await daemon2.channel_load("@STremblay")
+
+        with self.mock_server():
+            data = await daemon2.papr_server_add("http://reviewserver.org")
+
+
+        file_path = os.path.join(TESTS_DIR, "data", "document1.pdf")
+
+        ret = await self.daemon.papr_article_create(
+            base_claim_name="my-paper",
+            bid="0.001",
+            file_path=file_path,
+            title="My paper",
+            abstract="we did great stuff",
+            authors="Robert Tremblay",
+            tags=["test"],
+            encrypt=False,
+            server_name="Test Review Server",
+        )
+
+        await self.generate(1)
+        await self.ledger.wait(ret["tx"], self.blockchain.block_expected)
+
+        with self.mock_server():
+            response = await self.daemon.papr_article_request_review(
+                "my-paper", "Test Review Server"
+            )
+            self.assertNotIn("error", response)
+
+
+    def tearDown(self):
+        pass
+
+    async def test_recommend_valid_reviewer(self):
+        self.assertEqual(await sync_to_async(ReviewerRecommendation.objects.count)(), 0)
+        with self.mock_server():
+            ret = await self.daemon.papr_reviewer_recommend("my-paper_preprint", "Steve Tremblay", reviewer_channel="@STremblay")
+
+        self.assertIn('info', ret)
+        self.assertEqual(ret["status_code"], 201)
+        self.assertEqual(await sync_to_async(ReviewerRecommendation.objects.count)(), 1)
+
+    async def test_recommend_self(self):
+        self.assertEqual(await sync_to_async(ReviewerRecommendation.objects.count)(), 0)
+        with self.mock_server():
+            ret = await self.daemon.papr_reviewer_recommend("my-paper_preprint", "Robert Tremblay", reviewer_channel="@RTremblay")
+
+        self.assertIn('error', ret)
+        self.assertEqual(ret["status_code"], 400)
+        self.assertEqual(await sync_to_async(ReviewerRecommendation.objects.count)(), 0)
+
+    async def test_recommend_twice(self):
+        self.assertEqual(await sync_to_async(ReviewerRecommendation.objects.count)(), 0)
+        with self.mock_server():
+            ret = await self.daemon.papr_reviewer_recommend("my-paper_preprint", "Steve Tremblay", reviewer_channel="@STremblay")
+
+        self.assertIn('info', ret)
+        self.assertEqual(ret["status_code"], 201)
+        self.assertEqual(await sync_to_async(ReviewerRecommendation.objects.count)(), 1)
+
+        with self.mock_server():
+            ret = await self.daemon.papr_reviewer_recommend("my-paper_preprint", "Steve Tremblay", reviewer_channel="@STremblay")
+
+        self.assertIn('error', ret)
+        self.assertEqual(ret["status_code"], 400)
+        self.assertEqual(await sync_to_async(ReviewerRecommendation.objects.count)(), 1)

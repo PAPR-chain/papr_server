@@ -45,12 +45,58 @@ class ResearcherSerializer(ModelSerializer):
 
 
 class ReviewSerializer(ModelSerializer):
+    manuscript = SlugRelatedField(
+        many=False,
+        slug_field="claim_name",
+        queryset=Manuscript.objects.all(),
+    )
+    reviewer = SlugRelatedField(
+        many=False,
+        slug_field="channel_name",
+        queryset=Researcher.objects.all(),
+    )
+
+    # Verify signature
+
     class Meta:
         model = Review
-        fields = ["text"]
+        fields = ["text", "rating", "manuscript", "reviewer", "signature", "signing_ts"]
 
 
 class ReviewerRecommendationSerializer(ModelSerializer):
+    reviewer = SlugRelatedField(
+        many=False,
+        slug_field="channel_name",
+        queryset=Researcher.objects.all(),
+    )
+    voucher = SlugRelatedField(
+        many=False,
+        slug_field="channel_name",
+        queryset=Researcher.objects.all(),
+    )
+
+    article = SlugRelatedField(
+        many=False,
+        slug_field="base_claim_name",
+        queryset=SubmittedArticle.objects.all(),
+    )
+
+    def validate(self, data):
+        if data["voucher"] == data["reviewer"]:
+            raise ValidationError("You cannot recommend yourself")
+        if (
+            ReviewerRecommendation.objects.filter(
+                article=data["article"],
+                voucher=data["voucher"],
+                reviewer=data["reviewer"],
+            ).count()
+            != 0
+        ):
+            raise ValidationError(
+                "You have already made this exact same recommendation"
+            )
+        return data
+
     class Meta:
         model = ReviewerRecommendation
-        fields = ["manuscript"]
+        fields = ["article", "reviewer", "voucher"]

@@ -35,7 +35,6 @@ class PaprDaemonAPITestCase(PaprDaemonTestCase):
             await self.daemon.start()
             # PaprDaemonTestCase and APITestCase don't play nice with each other,
             # it is thus necessary to manually handle the test database.
-            await sync_to_async(call_command)("makemigrations")
             await sync_to_async(call_command)("migrate")
 
     async def asyncTearDown(self):
@@ -54,7 +53,7 @@ class PaprDaemonAPITestCase(PaprDaemonTestCase):
         request = HttpRequest()
         request.method = method
 
-        if 'json' in kwargs:
+        if "json" in kwargs:
             request.data = kwargs["json"]
             request.META["CONTENT_TYPE"] = "application/json"
             request.META["CONTENT_LENGTH"] = len(json.dumps(request.POST))
@@ -90,4 +89,3 @@ class PaprDaemonAPITestCase(PaprDaemonTestCase):
             m.post(pat, callback=self.process_request_post)
             m.get(pat, callback=self.process_request_get)
             yield
-
